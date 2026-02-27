@@ -4,21 +4,28 @@ Production-oriented scaffold for a Shopify embedded app that orchestrates pay-by
 
 ## Monorepo layout
 
-- `apps/api`: OAuth onboarding, payment initiation, webhook endpoint.
+- `apps/api`: OAuth onboarding/callback, payment initiation, provider+Shopify webhooks.
 - `apps/dashboard`: merchant analytics, savings, CSV export primitives.
-- `apps/checkout-extension`: checkout flow payload builder and retry UX helpers.
+- `apps/checkout-extension`: checkout flow payload builder + Shopify extension scaffold.
 - `packages/provider-connectors`: pluggable provider abstraction.
 - `packages/ledger`: double-entry + status machine.
 - `packages/webhook-handler`: secure, idempotent webhook processing.
 - `packages/auth`, `packages/config`, `packages/utils`: shared infrastructure.
 
-## Key architectural guarantees
+## Shopify best-practice alignment in this scaffold
 
-- No custody/intermediation of funds; provider APIs only.
-- Explicit transition state machine: `INITIATED -> PENDING -> CONFIRMED -> SETTLED|FAILED`.
-- Idempotent webhook processing via idempotency records.
-- Mandatory audit log model for all state changes.
+- OAuth install + callback shape with query HMAC verification.
+- Provider webhook raw-body signature verification path.
+- Shopify GDPR webhook endpoints scaffolded.
 - Input validation and rate limits on public endpoints.
+
+## What still must be completed before production App Store submission
+
+- Persist OAuth `state` nonce server-side and enforce replay/CSRF checks.
+- Verify Shopify webhook HMAC headers for compliance endpoints.
+- Use official Shopify App Bridge + session token verification middleware for embedded routes.
+- Implement full checkout extension UI with Shopify extension runtime APIs.
+- Add CI with executed tests, coverage threshold, and Shopify partner review checks.
 
 ## Run
 
@@ -39,4 +46,4 @@ Prisma schema lives in `apps/api/prisma/schema.prisma` and models:
 
 ## Notes
 
-This scaffold is intentionally modular and ready for replacing the `MockPayToProvider` with production provider SDK/API clients while preserving core orchestration logic.
+This scaffold is modular and intended for replacing `MockPayToProvider` with production provider integrations while preserving orchestration logic.

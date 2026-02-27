@@ -5,7 +5,7 @@
 1. **Shopify Checkout Extension (`apps/checkout-extension`)**
    - Captures pay-by-bank selection and creates a typed payment request.
 2. **API (`apps/api`)**
-   - Handles OAuth onboarding, payment initiation, webhook ingestion, and rate-limited public routes.
+   - Handles OAuth onboarding + callback, payment initiation, webhook ingestion, and rate-limited public routes.
 3. **Provider Connectors (`packages/provider-connectors`)**
    - Uniform abstraction for provider APIs (`PaymentProvider` interface).
 4. **Webhook Handler (`packages/webhook-handler`)**
@@ -17,7 +17,9 @@
 
 ## Data flow
 
+- Merchant installs app via Shopify OAuth install URL.
+- OAuth callback verifies query HMAC and exchanges code for access token.
 - Checkout initiates payment -> provider request created with idempotency key.
 - Provider sends signed webhook -> handler verifies HMAC and deduplicates.
 - Valid transition writes `Payment`, `LedgerEntry`, and `AuditEvent` atomically.
-- Dashboard reads payment + ledger state and computes savings vs 1.75% card baseline.
+- Shopify GDPR webhooks are ingested on dedicated compliance endpoints.
