@@ -12,20 +12,14 @@ Production-oriented scaffold for a Shopify embedded app that orchestrates pay-by
 - `packages/webhook-handler`: secure, idempotent webhook processing.
 - `packages/auth`, `packages/config`, `packages/utils`: shared infrastructure.
 
-## Shopify best-practice alignment in this scaffold
+## Shopify/App Store hardening included
 
-- OAuth install + callback shape with query HMAC verification.
+- OAuth install + callback query HMAC verification.
+- Signed OAuth `state` and replay-safe nonce consumption.
 - Provider webhook raw-body signature verification path.
-- Shopify GDPR webhook endpoints scaffolded.
+- Shopify compliance webhook HMAC verification path.
+- Embedded session token verification middleware scaffold for authenticated app routes.
 - Input validation and rate limits on public endpoints.
-
-## What still must be completed before production App Store submission
-
-- Persist OAuth `state` nonce server-side and enforce replay/CSRF checks.
-- Verify Shopify webhook HMAC headers for compliance endpoints.
-- Use official Shopify App Bridge + session token verification middleware for embedded routes.
-- Implement full checkout extension UI with Shopify extension runtime APIs.
-- Add CI with executed tests, coverage threshold, and Shopify partner review checks.
 
 ## Run
 

@@ -1,4 +1,5 @@
 import { randomUUID, createHash, createHmac } from "node:crypto";
+import { safeCompare } from "@paybank/utils";
 
 export const buildShopifyInstallUrl = (opts: {
   shop: string;
@@ -21,9 +22,6 @@ export const createNonce = () => randomUUID();
 
 export const hashToken = (token: string) => createHash("sha256").update(token).digest("hex");
 
-/**
- * Shopify OAuth callback and app proxy requests include `hmac` based on query params.
- */
 export const verifyShopifyQueryHmac = (
   query: Record<string, string | string[] | undefined>,
   clientSecret: string
@@ -41,7 +39,7 @@ export const verifyShopifyQueryHmac = (
     .join("&");
 
   const digest = createHmac("sha256", clientSecret).update(message, "utf8").digest("hex");
-  return digest === provided;
+  return safeCompare(digest, provided, "hex");
 };
 
 export const buildOAuthTokenRequest = (opts: {
@@ -57,3 +55,58 @@ export const buildOAuthTokenRequest = (opts: {
     code: opts.code
   }
 });
+
+export const signOAuthState = (nonce: string, secret: string, ttlSeconds = 300, now = Date.now()) => {
+  const payload = {
+    nonce,
+    exp: Math.floor(now / 1000) + ttlSeconds
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const signature = createHmac("sha256", secret).update(encodedPayload, "utf8").digest("hex");
+  return `${encodedPayload}.${signature}`;
+};
+
+export const verifyOAuthState = (token: string, secret: string, now = Date.now()) => {
+  const [encodedPayload, signature] = token.split(".");
+  if (!encodedPayload || !signature) {
+    return { ok: false as const, reason: "malformed" as const };
+  }
+
+  const expected = createHmac("sha256", secret).update(encodedPayload, "utf8").digest("hex");
+  if (!safeCompare(expected, signature, "hex")) {
+    return { ok: false as const, reason: "invalid_signature" as const };
+  }
+
+  const decoded = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as {
+    nonce: string;
+    exp: number;
+  };
+
+  if (decoded.exp < Math.floor(now / 1000)) {
+    return { ok: false as const, reason: "expired" as const };
+  }
+
+  return { ok: true as const, nonce: decoded.nonce };
+};
+
+export const verifyShopifySessionToken = (token: string, apiSecret: string, expectedAudience: string) => {
+  const [headerB64, payloadB64, signatureB64] = token.split(".");
+  if (!headerB64 || !payloadB64 || !signatureB64) return false;
+
+  const payloadRaw = `${headerB64}.${payloadB64}`;
+  const expectedSignature = createHmac("sha256", apiSecret).update(payloadRaw).digest("base64url");
+  if (!safeCompare(expectedSignature, signatureB64, "utf8")) return false;
+
+  const payload = JSON.parse(Buffer.from(payloadB64, "base64url").toString("utf8")) as {
+    aud: string;
+    exp: number;
+    nbf?: number;
+  };
+
+  const now = Math.floor(Date.now() / 1000);
+  if (payload.aud !== expectedAudience) return false;
+  if (payload.exp <= now) return false;
+  if (payload.nbf && payload.nbf > now) return false;
+
+  return true;
+};

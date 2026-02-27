@@ -6,15 +6,19 @@ import {
   buildShopifyInstallUrl,
   createNonce,
   hashToken,
-  verifyShopifyQueryHmac
+  signOAuthState,
+  verifyOAuthState,
+  verifyShopifyQueryHmac,
+  verifyShopifySessionToken
 } from "@paybank/auth";
 import { loadEnv } from "@paybank/config";
 import { MockPayToProvider, orderDataSchema } from "@paybank/provider-connectors";
-import { logger } from "@paybank/utils";
+import { hmacSha256Base64, logger, safeCompare } from "@paybank/utils";
 import { processWebhook } from "@paybank/webhook-handler";
 
 const env = loadEnv();
 const provider = new MockPayToProvider(env.PROVIDER_API_KEY, env.PROVIDER_WEBHOOK_SECRET);
+const oauthStateNonceStore = new Map<string, number>();
 
 const app = express();
 
@@ -27,7 +31,24 @@ app.use(
   })
 );
 
-// Keep raw body for signature checks.
+const verifyShopifyWebhook = (rawBody: string, headerHmac: string | undefined) => {
+  if (!headerHmac) return false;
+  const expected = hmacSha256Base64(env.SHOPIFY_API_SECRET, rawBody);
+  return safeCompare(expected, headerHmac, "base64");
+};
+
+const requireSessionToken: express.RequestHandler = (req, res, next) => {
+  const auth = req.header("authorization");
+  const token = auth?.startsWith("Bearer ") ? auth.replace("Bearer ", "") : undefined;
+
+  if (!token || !verifyShopifySessionToken(token, env.SHOPIFY_API_SECRET, env.SHOPIFY_API_KEY)) {
+    return res.status(401).json({ error: "Invalid session token" });
+  }
+
+  return next();
+};
+
+// Keep raw body for provider signature checks.
 app.post("/webhooks/provider", express.text({ type: "application/json" }), async (req, res) => {
   const signature = req.header("x-provider-signature");
   const idem = req.header("idempotency-key");
@@ -68,6 +89,20 @@ app.post("/webhooks/provider", express.text({ type: "application/json" }), async
   }
 });
 
+// Keep raw body for Shopify webhook HMAC verification.
+app.post("/webhooks/shopify/:topic", express.text({ type: "application/json" }), (req, res) => {
+  const topic = req.params.topic;
+  const hmac = req.header("x-shopify-hmac-sha256");
+
+  if (!verifyShopifyWebhook(req.body, hmac)) {
+    logger.warn({ topic }, "Rejected Shopify webhook: invalid signature");
+    return res.status(401).json({ error: "Invalid webhook signature" });
+  }
+
+  logger.info({ topic, body: req.body }, "Shopify compliance webhook received");
+  return res.sendStatus(200);
+});
+
 app.use(express.json({ type: "application/json" }));
 
 const installSchema = z.object({ shop: z.string().endsWith(".myshopify.com") });
@@ -77,16 +112,19 @@ app.get("/oauth/install", (req, res) => {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const state = createNonce();
+  const nonce = createNonce();
+  oauthStateNonceStore.set(nonce, Date.now());
+  const signedState = signOAuthState(nonce, env.SHOPIFY_API_SECRET);
+
   const installUrl = buildShopifyInstallUrl({
     shop: parsed.data.shop,
     apiKey: env.SHOPIFY_API_KEY,
     scopes: env.SHOPIFY_SCOPES,
     redirectUri: `${env.SHOPIFY_APP_URL}/oauth/callback`,
-    state
+    state: signedState
   });
 
-  return res.json({ installUrl, state });
+  return res.json({ installUrl });
 });
 
 const oauthCallbackSchema = z.object({
@@ -105,6 +143,13 @@ app.get("/oauth/callback", async (req, res) => {
   if (!verifyShopifyQueryHmac(req.query as Record<string, string>, env.SHOPIFY_API_SECRET)) {
     return res.status(401).json({ error: "Invalid OAuth callback signature" });
   }
+
+  const stateResult = verifyOAuthState(parsed.data.state, env.SHOPIFY_API_SECRET);
+  if (!stateResult.ok || !oauthStateNonceStore.has(stateResult.nonce)) {
+    return res.status(401).json({ error: "Invalid or replayed OAuth state" });
+  }
+
+  oauthStateNonceStore.delete(stateResult.nonce);
 
   try {
     const tokenRequest = buildOAuthTokenRequest({
@@ -126,13 +171,7 @@ app.get("/oauth/callback", async (req, res) => {
     }
 
     const { access_token } = (await response.json()) as { access_token: string };
-    logger.info(
-      {
-        shop: parsed.data.shop,
-        tokenHash: hashToken(access_token)
-      },
-      "Persist merchant install session"
-    );
+    logger.info({ shop: parsed.data.shop, tokenHash: hashToken(access_token) }, "Persist merchant install session");
 
     return res.status(200).json({ ok: true, shop: parsed.data.shop });
   } catch (error) {
@@ -141,19 +180,8 @@ app.get("/oauth/callback", async (req, res) => {
   }
 });
 
-app.post("/webhooks/shopify/customers-data-request", (req, res) => {
-  logger.info({ body: req.body }, "GDPR customers/data_request webhook received");
-  return res.sendStatus(200);
-});
-
-app.post("/webhooks/shopify/customers-redact", (req, res) => {
-  logger.info({ body: req.body }, "GDPR customers/redact webhook received");
-  return res.sendStatus(200);
-});
-
-app.post("/webhooks/shopify/shop-redact", (req, res) => {
-  logger.info({ body: req.body }, "GDPR shop/redact webhook received");
-  return res.sendStatus(200);
+app.get("/api/merchant", requireSessionToken, (_req, res) => {
+  return res.json({ ok: true, message: "Authenticated embedded request" });
 });
 
 app.post("/payments/initiate", async (req, res) => {

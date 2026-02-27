@@ -6,9 +6,12 @@ export const logger = pino({ level: process.env.NODE_ENV === "production" ? "inf
 export const hmacSha256 = (secret: string, payload: string) =>
   createHmac("sha256", secret).update(payload, "utf8").digest("hex");
 
-export const safeCompare = (a: string, b: string) => {
-  const aBuffer = Buffer.from(a, "hex");
-  const bBuffer = Buffer.from(b, "hex");
+export const hmacSha256Base64 = (secret: string, payload: string) =>
+  createHmac("sha256", secret).update(payload, "utf8").digest("base64");
+
+export const safeCompare = (a: string, b: string, encoding: BufferEncoding = "hex") => {
+  const aBuffer = Buffer.from(a, encoding);
+  const bBuffer = Buffer.from(b, encoding);
   if (aBuffer.length !== bBuffer.length) {
     return false;
   }
