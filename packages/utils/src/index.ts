@@ -1,0 +1,26 @@
+import pino from "pino";
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+export const logger = pino({ level: process.env.NODE_ENV === "production" ? "info" : "debug" });
+
+export const hmacSha256 = (secret: string, payload: string) =>
+  createHmac("sha256", secret).update(payload, "utf8").digest("hex");
+
+export const safeCompare = (a: string, b: string) => {
+  const aBuffer = Buffer.from(a, "hex");
+  const bBuffer = Buffer.from(b, "hex");
+  if (aBuffer.length !== bBuffer.length) {
+    return false;
+  }
+  return timingSafeEqual(aBuffer, bBuffer);
+};
+
+export class DomainError extends Error {
+  constructor(
+    message: string,
+    public readonly context: Record<string, unknown> = {}
+  ) {
+    super(message);
+    this.name = "DomainError";
+  }
+}

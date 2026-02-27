@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  CONFIRMED
+  SETTLED
+  FAILED
+}
+
+model Merchant {
+  id              String   @id @default(uuid())
+  shopDomain      String   @unique
+  accessTokenHash String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  payments        Payment[]
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  merchantId        String
+  orderId           String
+  providerPaymentId String        @unique
+  amountMinor       Int
+  currency          String
+  status            PaymentStatus
+  idempotencyKey    String
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  merchant          Merchant      @relation(fields: [merchantId], references: [id])
+  ledgerEntries     LedgerEntry[]
+  auditEvents       AuditEvent[]
+
+  @@unique([merchantId, orderId])
+  @@index([status])
+}
+
+model LedgerEntry {
+  id             String   @id
+  paymentId      String
+  type           String
+  account        String
+  amountMinor    Int
+  currency       String
+  idempotencyKey String
+  createdAt      DateTime @default(now())
+  payment        Payment  @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@index([idempotencyKey])
+}
+
+model AuditEvent {
+  id          String   @id @default(uuid())
+  paymentId   String?
+  merchantId  String?
+  actor       String
+  eventType   String
+  payloadJson Json
+  createdAt   DateTime @default(now())
+  payment     Payment? @relation(fields: [paymentId], references: [id])
+
+  @@index([merchantId, createdAt])
+}
+
+model IdempotencyRecord {
+  key        String   @id
+  scope      String
+  requestHash String
+  createdAt  DateTime @default(now())
+}
