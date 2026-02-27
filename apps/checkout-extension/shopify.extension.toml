@@ -1,0 +1,9 @@
+name = "pay-by-bank"
+type = "checkout_ui_extension"
+
+[extension]
+api_version = "2024-10"
+
+[[extensions.targeting]]
+module = "./extensions/pay-by-bank/src/index.tsx"
+target = "purchase.checkout.block.render"
